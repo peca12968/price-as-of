@@ -3,9 +3,11 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 import sys
+from tempfile import TemporaryDirectory
 
 import duckdb
 
@@ -82,7 +84,28 @@ def load_history(path):
     return list(history.values())
 
 
-def audit(revisions, orders, cutoff):
+def export_parquet(db, destination, cutoff):
+    # Stage on the same filesystem so readers only see a complete footer and an
+    # existing report wins even if two exporters choose the same destination.
+    with TemporaryDirectory(dir=destination.parent) as directory:
+        stage = Path(directory) / "export.parquet"
+        db.execute("""
+            COPY (
+                SELECT a.order_id, a.sku, a.placed_at AT TIME ZONE 'UTC' AS placed_at,
+                       CAST(? AS TIMESTAMP) AT TIME ZONE 'UTC' AS cutoff, a.quantity,
+                       a.status AS at_order_status, b.status AS at_audit_status,
+                       a.price AS at_order_unit_cents, b.price AS at_audit_unit_cents,
+                       CAST((b.price::HUGEINT - a.price) * a.quantity AS DECIMAL(38,0)) AS delta_cents,
+                       coalesce(a.sources, []) AS at_order_sources, coalesce(b.sources, []) AS at_audit_sources
+                FROM perspectives a JOIN perspectives b USING(order_id)
+                WHERE a.perspective='at_order' AND b.perspective='at_audit'
+                ORDER BY b.price ASC NULLS LAST, a.order_id
+            ) TO ? (FORMAT PARQUET, ROW_GROUP_SIZE 2048, COMPRESSION ZSTD)
+        """, [cutoff, str(stage)])
+        os.link(stage, destination)
+
+
+def audit(revisions, orders, cutoff, parquet=None):
     if any(row[2] > cutoff for row in orders):
         raise ValueError("audit cutoff precedes an order")
     if len({row[0] for row in orders}) != len(orders):
@@ -95,7 +118,12 @@ def audit(revisions, orders, cutoff):
             db.executemany("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)", revisions)
         if orders:
             db.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
-        rows = db.execute((ROOT / "prices.sql").read_text(encoding="utf-8"), [cutoff]).fetchall()
+        query = (ROOT / "prices.sql").read_text(encoding="utf-8")
+        if parquet is not None:
+            db.execute("CREATE TEMP TABLE perspectives AS " + query, [cutoff])
+            export_parquet(db, parquet, cutoff)
+            return {"cutoff": cutoff.isoformat() + "Z", "orders_written": len(orders), "parquet": str(parquet)}
+        rows = db.execute(query, [cutoff]).fetchall()
     by_order = {}
     for key, sku, placed, qty, perspective, status, unit, sources in rows:
         item = by_order.setdefault(key, {"order_id": key, "sku": sku, "placed_at": placed.isoformat() + "Z",
@@ -121,10 +149,11 @@ def main():
     parser.add_argument("revisions", type=Path)
     parser.add_argument("orders", type=Path)
     parser.add_argument("--as-of", required=True)
+    parser.add_argument("--parquet", type=Path, help="write one row per order to a new Parquet file")
     args = parser.parse_args()
     try:
         result = audit(load_history(args.revisions), list(read_rows(args.orders, ORDER_FIELDS, order)),
-                       timestamp(args.as_of))
+                       timestamp(args.as_of), args.parquet)
     except (ValueError, OverflowError, OSError, csv.Error, duckdb.Error) as exc:
         parser.exit(2, f"audit failed: {exc}\n")
     print(json.dumps(result, ensure_ascii=True, indent=2))
