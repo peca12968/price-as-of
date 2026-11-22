@@ -1,0 +1,20 @@
+name: Verify Parquet row group estimates
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest -v
+      - run: python layout_demo.py build-layout
+      - run: python scout.py build-layout/sorted.parquet seq 4096 6144 --and seq 4500 6000 --project label
