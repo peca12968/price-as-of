@@ -1,5 +1,6 @@
 """Estimate integer range-filter pruning using a Parquet footer."""
 import argparse
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -30,7 +31,8 @@ def inspect(path, column, lower, upper, project=(), filters=()):
         old_lo, old_hi = ranges.get(name, (lo, hi))
         ranges[name] = max(old_lo, lo), min(old_hi, hi)
     wanted = list(dict.fromkeys((*ranges, *project)))
-    with pq.ParquetFile(path) as file:
+    source = nullcontext(path) if isinstance(path, pq.ParquetFile) else pq.ParquetFile(path)
+    with source as file:
         schema = file.schema_arrow
         leaves = {}
         for name in wanted:

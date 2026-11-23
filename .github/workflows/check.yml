@@ -18,3 +18,10 @@ jobs:
       - run: python -m unittest -v
       - run: python layout_demo.py build-layout
       - run: python scout.py build-layout/sorted.parquet seq 4096 6144 --and seq 4500 6000 --project label
+      - uses: actions/checkout@v7
+        with:
+          repository: peca12968/iceberg-footprint
+          ref: a4324515476369c77c3b19587ea02cae93290257
+          path: footprint
+      - run: python -m pip install -r requirements-iceberg.txt
+      - run: python iceberg_demo.py footprint/footprint.py
