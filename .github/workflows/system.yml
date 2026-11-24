@@ -74,3 +74,90 @@ jobs:
     defaults:
       run:
         working-directory: modules/iceberg-footprint
+  cohort-replay-replay:
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - run: python -m unittest -v
+    - run: python example_check.py
+    defaults:
+      run:
+        working-directory: modules/cohort-replay
+  reach-sketch-verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - windows-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v6
+      with:
+        go-version: 1.25.x
+        cache: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.13'
+    - run: go vet ./...
+    - run: go test -v ./...
+    - run: python demo.py
+    defaults:
+      run:
+        working-directory: modules/reach-sketch
+  column-bridge-migration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        postgres:
+        - '16'
+        - '18'
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        ports:
+        - 5432:5432
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: rehearsal
+        options: --health-cmd pg_isready --health-interval 3s --health-timeout 3s --health-retries 15
+    env:
+      DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/rehearsal
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: modules/column-bridge/package-lock.json
+    - run: npm ci
+    - run: npm test
+    - run: npm run demo
+    defaults:
+      run:
+        working-directory: modules/column-bridge
+  page-ledger-sqlite:
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - run: python -m unittest -v
+    - run: python demo.py
+    defaults:
+      run:
+        working-directory: modules/page-ledger

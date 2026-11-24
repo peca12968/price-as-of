@@ -1,0 +1,8 @@
+{"id":"a-sign","person":"A","kind":"signup","occurred_at":"2026-11-02T10:00:00Z","recorded_at":"2026-11-02T10:00:00Z"}
+{"id":"b-sign","person":"B","kind":"signup","occurred_at":"2026-11-08T23:00:00Z","recorded_at":"2026-11-08T23:00:00Z"}
+{"id":"c-sign","person":"C","kind":"signup","occurred_at":"2026-11-09T00:00:00Z","recorded_at":"2026-11-09T00:00:00Z"}
+{"id":"b-preview","person":"B","kind":"active","occurred_at":"2026-11-08T20:00:00Z","recorded_at":"2026-11-08T20:00:00Z"}
+{"id":"a-1","person":"A","kind":"active","occurred_at":"2026-11-03T00:00:00Z","recorded_at":"2026-11-03T00:00:00Z"}
+{"id":"a-2","person":"A","kind":"active","occurred_at":"2026-11-04T00:00:00Z","recorded_at":"2026-11-04T00:00:00Z"}
+{"id":"b-late","person":"B","kind":"active","occurred_at":"2026-11-13T00:00:00Z","recorded_at":"2026-11-17T00:00:00Z"}
+{"id":"c-1","person":"C","kind":"active","occurred_at":"2026-11-10T00:00:00Z","recorded_at":"2026-11-10T00:00:00Z"}
