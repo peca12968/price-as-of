@@ -11,9 +11,8 @@
 ```sh
 python -m pip install -r requirements-iceberg.txt
 python snapshot_scout.py /path/to/metadata.json 12345 1 10 20
-git clone https://github.com/peca12968/price-as-of.git ../iceberg-footprint
-git -C ../iceberg-footprint checkout a4324515476369c77c3b19587ea02cae93290257
-python iceberg_demo.py ../iceberg-footprint/footprint.py
+git worktree add --detach ../iceberg-footprint-verified a4324515476369c77c3b19587ea02cae93290257
+python iceberg_demo.py ../iceberg-footprint-verified/footprint.py
 ```
 
 報告逐檔列出實體欄名、判定依據、候選 row group 與符合筆數上下界。示範匯入一個缺少 field ID 的外部檔後，界限放寬至 2 到 4 筆，完整解碼查得 3 筆。若欄位在舊檔可確定不存在，則依其初始預設值或空值判定。對含位置刪除的資料檔，下界按關聯刪除檔的紀錄數保守扣除，上界維持原估算。支援 PyIceberg 能建立掃描計畫的 v1/v2 快照和 Parquet 資料檔。
