@@ -104,25 +104,46 @@ def load_history(path):
     return list(history.values())
 
 
-def export_parquet(db, destination, cutoff):
+def write_parquet(db, destination, query, parameters=()):
     # Stage on the same filesystem so readers only see a complete footer and an
     # existing report wins even if two exporters choose the same destination.
     with TemporaryDirectory(dir=destination.parent) as directory:
         stage = Path(directory) / "export.parquet"
-        db.execute("""
-            COPY (
-                SELECT a.order_id, a.sku, a.placed_at AT TIME ZONE 'UTC' AS placed_at,
-                       CAST(? AS TIMESTAMP) AT TIME ZONE 'UTC' AS cutoff, a.quantity,
-                       a.status AS at_order_status, b.status AS at_audit_status,
-                       a.price AS at_order_unit_cents, b.price AS at_audit_unit_cents,
-                       CAST((b.price::HUGEINT - a.price) * a.quantity AS DECIMAL(38,0)) AS delta_cents,
-                       coalesce(a.sources, []) AS at_order_sources, coalesce(b.sources, []) AS at_audit_sources
-                FROM perspectives a JOIN perspectives b USING(order_id)
-                WHERE a.perspective='at_order' AND b.perspective='at_audit'
-                ORDER BY b.price ASC NULLS LAST, a.order_id
-            ) TO ? (FORMAT PARQUET, ROW_GROUP_SIZE 2048, COMPRESSION ZSTD)
-        """, [cutoff, str(stage)])
+        db.execute(f"COPY ({query}) TO ? (FORMAT PARQUET, ROW_GROUP_SIZE 2048, COMPRESSION ZSTD)",
+                   [*parameters, str(stage)])
         os.link(stage, destination)
+
+
+def export_parquet(db, destination, cutoff):
+    write_parquet(db, destination, """
+        SELECT a.order_id, a.sku, a.placed_at AT TIME ZONE 'UTC' AS placed_at,
+               CAST(? AS TIMESTAMP) AT TIME ZONE 'UTC' AS cutoff, a.quantity,
+               a.status AS at_order_status, b.status AS at_audit_status,
+               a.price AS at_order_unit_cents, b.price AS at_audit_unit_cents,
+               CAST((b.price::HUGEINT - a.price) * a.quantity AS DECIMAL(38,0)) AS delta_cents,
+               coalesce(a.sources, []) AS at_order_sources, coalesce(b.sources, []) AS at_audit_sources
+        FROM perspectives a JOIN perspectives b USING(order_id)
+        WHERE a.perspective='at_order' AND b.perspective='at_audit'
+        ORDER BY b.price ASC NULLS LAST, a.order_id
+    """, [cutoff])
+
+
+def export_comparison_parquet(db, destination):
+    write_parquet(db, destination, """
+        SELECT a.order_id, a.sku, a.placed_at AT TIME ZONE 'UTC' AS placed_at,
+               a.known_at AT TIME ZONE 'UTC' AS from_cutoff, b.known_at AT TIME ZONE 'UTC' AS cutoff,
+               a.quantity, a.status AS before_status, b.status AS after_status,
+               a.price AS before_unit_cents, b.price AS after_unit_cents,
+               CASE WHEN a.status <> b.status THEN 'status_changed'
+                    WHEN a.price IS DISTINCT FROM b.price THEN 'unit_price_changed'
+                    WHEN a.sources IS DISTINCT FROM b.sources THEN 'source_changed'
+                    ELSE 'unchanged' END AS change,
+               CAST((b.price::HUGEINT - a.price) * a.quantity AS DECIMAL(38,0)) AS delta_cents,
+               coalesce(a.sources, []) AS before_sources, coalesce(b.sources, []) AS after_sources
+        FROM perspectives a JOIN perspectives b USING(order_id)
+        WHERE a.perspective='before' AND b.perspective='after'
+        ORDER BY a.sku, a.order_id
+    """)
 
 
 def price_state(status, unit, sources):
@@ -184,8 +205,8 @@ def compare_prices(items, from_cutoff, cutoff, orders_after_from_cutoff):
 def audit(revisions, orders, cutoff, parquet=None, *, history_order=None, from_cutoff=None):
     if len({row[0] for row in orders}) != len(orders):
         raise ValueError("duplicate order_id")
-    if from_cutoff is not None and (parquet is not None or history_order is not None):
-        raise ValueError("cutoff comparison is mutually exclusive with history and Parquet export")
+    if from_cutoff is not None and history_order is not None:
+        raise ValueError("cutoff comparison and history are mutually exclusive")
     if history_order is not None:
         if parquet is not None:
             raise ValueError("history and Parquet export are mutually exclusive")
@@ -219,6 +240,11 @@ def audit(revisions, orders, cutoff, parquet=None, *, history_order=None, from_c
         query = (ROOT / "prices.sql").read_text(encoding="utf-8")
         if parquet is not None:
             db.execute("CREATE TEMP TABLE perspectives AS " + query)
+            if from_cutoff is not None:
+                export_comparison_parquet(db, parquet)
+                return {"from_cutoff": from_cutoff.isoformat() + "Z", "cutoff": cutoff.isoformat() + "Z",
+                        "orders_written": len(orders), "orders_after_from_cutoff": orders_after_from_cutoff,
+                        "parquet": str(parquet)}
             export_parquet(db, parquet, cutoff)
             return {"cutoff": cutoff.isoformat() + "Z", "orders_written": len(orders), "parquet": str(parquet)}
         rows = db.execute(query).fetchall()
@@ -249,7 +275,7 @@ def main():
     parser.add_argument("orders", type=Path)
     parser.add_argument("--as-of", required=True)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--parquet", type=Path, help="write one row per order to a new Parquet file")
+    parser.add_argument("--parquet", type=Path, help="write one row per scoped order to a new Parquet file")
     mode.add_argument("--history", metavar="ORDER_ID", help="explain changes after a specific order was placed")
     mode.add_argument("--from-as-of", metavar="TIMESTAMP", help="compare two cutoffs over orders placed by this instant")
     args = parser.parse_args()

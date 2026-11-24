@@ -1,0 +1,119 @@
+[
+  {
+    "from_cutoff": "2026-04-13T00:00:00Z",
+    "cutoff": "2026-04-23T00:00:00Z",
+    "orders_written": 5,
+    "orders_after_from_cutoff": 1,
+    "delta_type": "DECIMAL(38,0)",
+    "rows": [
+      {
+        "order_id": "B04",
+        "sku": "BOOK",
+        "quantity": 1,
+        "change": "status_changed",
+        "before_status": "missing",
+        "after_status": "priced",
+        "delta_cents": null
+      },
+      {
+        "order_id": "G07",
+        "sku": "GIFT",
+        "quantity": 1,
+        "change": "status_changed",
+        "before_status": "ambiguous",
+        "after_status": "priced",
+        "delta_cents": null
+      },
+      {
+        "order_id": "K11",
+        "sku": "KIT",
+        "quantity": 1,
+        "change": "unit_price_changed",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 150
+      },
+      {
+        "order_id": "K13",
+        "sku": "KIT",
+        "quantity": 2,
+        "change": "unit_price_changed",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 300
+      },
+      {
+        "order_id": "X04",
+        "sku": "UNKNOWN",
+        "quantity": 1,
+        "change": "unchanged",
+        "before_status": "missing",
+        "after_status": "missing",
+        "delta_cents": null
+      }
+    ]
+  },
+  {
+    "from_cutoff": "2026-04-23T00:00:00Z",
+    "cutoff": "2026-04-25T00:00:00Z",
+    "orders_written": 6,
+    "orders_after_from_cutoff": 0,
+    "delta_type": "DECIMAL(38,0)",
+    "rows": [
+      {
+        "order_id": "B04",
+        "sku": "BOOK",
+        "quantity": 1,
+        "change": "unchanged",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 0
+      },
+      {
+        "order_id": "G07",
+        "sku": "GIFT",
+        "quantity": 1,
+        "change": "unchanged",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 0
+      },
+      {
+        "order_id": "K11",
+        "sku": "KIT",
+        "quantity": 1,
+        "change": "unchanged",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 0
+      },
+      {
+        "order_id": "K13",
+        "sku": "KIT",
+        "quantity": 2,
+        "change": "unchanged",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 0
+      },
+      {
+        "order_id": "K16",
+        "sku": "KIT",
+        "quantity": 3,
+        "change": "source_changed",
+        "before_status": "priced",
+        "after_status": "priced",
+        "delta_cents": 0
+      },
+      {
+        "order_id": "X04",
+        "sku": "UNKNOWN",
+        "quantity": 1,
+        "change": "unchanged",
+        "before_status": "missing",
+        "after_status": "missing",
+        "delta_cents": null
+      }
+    ]
+  }
+]

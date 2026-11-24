@@ -70,6 +70,23 @@ python audit.py examples/revisions.csv examples/orders.csv --as-of 2026-04-23T00
 
 檔案依回查單價、訂單編號排序，以便下游依價格範圍查核。跨專案演練交錯建立 6,144 筆訂單，尋找單價 800 美分且數量為 2 的訂單。Rowgroup Scout 從檔尾識別出三組中只有一組需要保留，再以 DuckDB 實查並逐筆核對全部 1,024 個訂單編號。[整合演練](layout_drill.py) · [Rowgroup Scout](https://github.com/peca12968/price-as-of/tree/main/modules/rowgroup-scout)
 
+### 匯出兩個截止點的比較明細
+
+```sh
+python audit.py examples/revisions.csv examples/orders.csv --from-as-of 2026-04-13T00:00:00Z --as-of 2026-04-23T00:00:00Z --parquet comparison.parquet
+```
+
+可將同一批舊訂單交給下游查核。Parquet 每一列保留兩個截止時間、兩組價格來源和 `change` 分類，包含未異動的訂單。結果按 SKU 和訂單號排序。K16 在起始截止時間之後成立，所以範例的報告檔有 5 筆，另有 1 筆新單計入命令輸出的 `orders_after_from_cutoff`。
+
+```sql
+SELECT change, count(*) AS orders, sum(delta_cents) AS net_cents
+FROM read_parquet('comparison.parquet')
+GROUP BY change
+ORDER BY change;
+```
+
+兩端皆有唯一價格時，`delta_cents` 是精確的 `DECIMAL(38,0)` 數量加權差額。無法比較時為 NULL，價格相同時為 0，兩者可用 SQL 分開核對。匯出空批次仍會建立具有完整欄位型別的 Parquet。既有報告檔受到保護，兩個匯出程序競爭同一檔名時只有一個會成功。執行 `python cutoff_parquet_demo.py` 可重跑兩個範例，並列出從實際 Parquet 讀回的資料。[回讀範例](examples/cutoff-parquet.json) · [Parquet 回讀與並行測試](test_parquet.py)
+
 ### 核對雙時間查詢
 
 測試以固定種子建立 180 筆價格修訂與 240 筆訂單，在 3 個查核截止時間逐筆比對兩種觀點，共 1,440 次價格查詢。獨立 Python 實作按登錄順序逐筆套用修訂與撤回，再搜尋當時有效的候選，核對狀態、價格、來源版本及時間。邊界測試另外涵蓋修訂前一微秒、修訂當下、零元價格、相同金額的歧義及亂序重送。[測試程式](test_audit.py)
