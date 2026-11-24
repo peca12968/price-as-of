@@ -1,5 +1,6 @@
 """Reconstruct order prices as originally known and as known at a later cutoff."""
 import argparse
+from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timezone
 import json
@@ -29,6 +30,12 @@ HISTORY_QUESTIONS = """
     FROM orders o JOIN revisions r ON o.sku = r.sku
     WHERE o.placed_at < r.recorded_at AND r.recorded_at <= CAST(? AS TIMESTAMP)
 """
+COMPARISON_QUESTIONS = """
+    SELECT *, 'before' AS perspective, CAST(? AS TIMESTAMP) AS known_at FROM orders
+    UNION ALL
+    SELECT *, 'after', CAST(? AS TIMESTAMP) FROM orders
+"""
+CHANGE_TYPES = ("unchanged", "status_changed", "unit_price_changed", "source_changed")
 
 
 def timestamp(text):
@@ -142,9 +149,43 @@ def price_history(rows, revisions, selected, cutoff):
             "cutoff": cutoff.isoformat() + "Z", "history": steps}
 
 
-def audit(revisions, orders, cutoff, parquet=None, *, history_order=None):
+def comparison_totals(items):
+    changes = Counter(item["change"] for item in items)
+    deltas = [item["delta_cents"] for item in items if item["delta_cents"] is not None]
+    return {"cohort_orders": len(items), "comparable_orders": len(deltas), "excluded_orders": len(items) - len(deltas),
+            "counts": {kind: changes[kind] for kind in CHANGE_TYPES},
+            "net_delta_cents": sum(deltas) if deltas else None,
+            "increase_cents": sum(delta for delta in deltas if delta > 0) if deltas else None,
+            "decrease_cents": -sum(delta for delta in deltas if delta < 0) if deltas else None}
+
+
+def compare_prices(items, from_cutoff, cutoff, orders_after_from_cutoff):
+    by_sku = defaultdict(list)
+    for item in items:
+        before, after = item["before"], item["after"]
+        old, new = before["unit_cents"], after["unit_cents"]
+        if before["status"] != after["status"]:
+            kind = "status_changed"
+        elif old != new:
+            kind = "unit_price_changed"
+        elif before["sources"] != after["sources"]:
+            kind = "source_changed"
+        else:
+            kind = "unchanged"
+        item["change"] = kind
+        item["delta_cents"] = (new - old) * item["quantity"] if old is not None and new is not None else None
+        by_sku[item["sku"]].append(item)
+    return {"from_cutoff": from_cutoff.isoformat() + "Z", "cutoff": cutoff.isoformat() + "Z",
+            "orders_after_from_cutoff": orders_after_from_cutoff, **comparison_totals(items),
+            "by_sku": [{"sku": sku, **comparison_totals(group)} for sku, group in sorted(by_sku.items())],
+            "changes": [item for item in items if item["change"] != "unchanged"]}
+
+
+def audit(revisions, orders, cutoff, parquet=None, *, history_order=None, from_cutoff=None):
     if len({row[0] for row in orders}) != len(orders):
         raise ValueError("duplicate order_id")
+    if from_cutoff is not None and (parquet is not None or history_order is not None):
+        raise ValueError("cutoff comparison is mutually exclusive with history and Parquet export")
     if history_order is not None:
         if parquet is not None:
             raise ValueError("history and Parquet export are mutually exclusive")
@@ -155,6 +196,17 @@ def audit(revisions, orders, cutoff, parquet=None, *, history_order=None):
         revisions = [row for row in revisions if row[2] == sku and row[5] <= cutoff]
     if any(row[2] > cutoff for row in orders):
         raise ValueError("audit cutoff precedes an order")
+    questions, parameters = AUDIT_QUESTIONS, [cutoff]
+    orders_after_from_cutoff = 0
+    if history_order is not None:
+        questions = HISTORY_QUESTIONS
+    elif from_cutoff is not None:
+        if from_cutoff > cutoff:
+            raise ValueError("comparison start must be at or before the audit cutoff")
+        cohort = [row for row in orders if row[2] <= from_cutoff]
+        orders_after_from_cutoff = len(orders) - len(cohort)
+        orders = cohort
+        questions, parameters = COMPARISON_QUESTIONS, [from_cutoff, cutoff]
     with duckdb.connect(":memory:") as db:
         db.execute("""CREATE TABLE revisions(change_id VARCHAR, revision BIGINT, sku VARCHAR, action VARCHAR,
                       effective_at TIMESTAMP, recorded_at TIMESTAMP, unit_cents BIGINT)""")
@@ -163,8 +215,7 @@ def audit(revisions, orders, cutoff, parquet=None, *, history_order=None):
             db.executemany("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)", revisions)
         if orders:
             db.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
-        questions = AUDIT_QUESTIONS if history_order is None else HISTORY_QUESTIONS
-        db.execute("CREATE TEMP TABLE price_questions AS " + questions, [cutoff])
+        db.execute("CREATE TEMP TABLE price_questions AS " + questions, parameters)
         query = (ROOT / "prices.sql").read_text(encoding="utf-8")
         if parquet is not None:
             db.execute("CREATE TEMP TABLE perspectives AS " + query)
@@ -178,6 +229,8 @@ def audit(revisions, orders, cutoff, parquet=None, *, history_order=None):
         item = by_order.setdefault(key, {"order_id": key, "sku": sku, "placed_at": placed.isoformat() + "Z",
                                          "quantity": qty})
         item[perspective] = price_state(status, unit, sources)
+    if from_cutoff is not None:
+        return compare_prices(list(by_order.values()), from_cutoff, cutoff, orders_after_from_cutoff)
     deltas = []
     for item in by_order.values():
         old, new = (item[view]["unit_cents"] for view in ("at_order", "at_audit"))
@@ -198,10 +251,12 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--parquet", type=Path, help="write one row per order to a new Parquet file")
     mode.add_argument("--history", metavar="ORDER_ID", help="explain changes after a specific order was placed")
+    mode.add_argument("--from-as-of", metavar="TIMESTAMP", help="compare two cutoffs over orders placed by this instant")
     args = parser.parse_args()
     try:
         result = audit(load_history(args.revisions), list(read_rows(args.orders, ORDER_FIELDS, order)),
-                       timestamp(args.as_of), args.parquet, history_order=args.history)
+                       timestamp(args.as_of), args.parquet, history_order=args.history,
+                       from_cutoff=timestamp(args.from_as_of) if args.from_as_of is not None else None)
     except (ValueError, OverflowError, OSError, csv.Error, duckdb.Error) as exc:
         parser.exit(2, f"audit failed: {exc}\n")
     print(json.dumps(result, ensure_ascii=True, indent=2))
