@@ -104,6 +104,13 @@ def load_history(path):
     return list(history.values())
 
 
+def load_revisions(db, revisions):
+    db.execute("""CREATE TABLE revisions(change_id VARCHAR, revision BIGINT, sku VARCHAR, action VARCHAR,
+                  effective_at TIMESTAMP, recorded_at TIMESTAMP, unit_cents BIGINT)""")
+    if revisions:
+        db.executemany("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)", revisions)
+
+
 def write_parquet(db, destination, query, parameters=()):
     # Stage on the same filesystem so readers only see a complete footer and an
     # existing report wins even if two exporters choose the same destination.
@@ -180,20 +187,22 @@ def comparison_totals(items):
             "decrease_cents": -sum(delta for delta in deltas if delta < 0) if deltas else None}
 
 
+def price_change(before, after):
+    if before["status"] != after["status"]:
+        return "status_changed"
+    if before["unit_cents"] != after["unit_cents"]:
+        return "unit_price_changed"
+    if before["sources"] != after["sources"]:
+        return "source_changed"
+    return "unchanged"
+
+
 def compare_prices(items, from_cutoff, cutoff, orders_after_from_cutoff):
     by_sku = defaultdict(list)
     for item in items:
         before, after = item["before"], item["after"]
         old, new = before["unit_cents"], after["unit_cents"]
-        if before["status"] != after["status"]:
-            kind = "status_changed"
-        elif old != new:
-            kind = "unit_price_changed"
-        elif before["sources"] != after["sources"]:
-            kind = "source_changed"
-        else:
-            kind = "unchanged"
-        item["change"] = kind
+        item["change"] = price_change(before, after)
         item["delta_cents"] = (new - old) * item["quantity"] if old is not None and new is not None else None
         by_sku[item["sku"]].append(item)
     return {"from_cutoff": from_cutoff.isoformat() + "Z", "cutoff": cutoff.isoformat() + "Z",
@@ -229,11 +238,8 @@ def audit(revisions, orders, cutoff, parquet=None, *, history_order=None, from_c
         orders = cohort
         questions, parameters = COMPARISON_QUESTIONS, [from_cutoff, cutoff]
     with duckdb.connect(":memory:") as db:
-        db.execute("""CREATE TABLE revisions(change_id VARCHAR, revision BIGINT, sku VARCHAR, action VARCHAR,
-                      effective_at TIMESTAMP, recorded_at TIMESTAMP, unit_cents BIGINT)""")
+        load_revisions(db, revisions)
         db.execute("CREATE TABLE orders(order_id VARCHAR, sku VARCHAR, placed_at TIMESTAMP, quantity BIGINT)")
-        if revisions:
-            db.executemany("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)", revisions)
         if orders:
             db.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
         db.execute("CREATE TEMP TABLE price_questions AS " + questions, parameters)
