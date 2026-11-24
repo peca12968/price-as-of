@@ -17,6 +17,19 @@ REVISION_FIELDS = "change_id revision sku action effective_at recorded_at unit_c
 ORDER_FIELDS = "order_id sku placed_at quantity".split()
 TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])")
 
+AUDIT_QUESTIONS = """
+    SELECT *, 'at_order' AS perspective, placed_at AS known_at FROM orders
+    UNION ALL
+    SELECT *, 'at_audit', CAST(? AS TIMESTAMP) FROM orders
+"""
+HISTORY_QUESTIONS = """
+    SELECT *, 'history' AS perspective, placed_at AS known_at FROM orders
+    UNION ALL
+    SELECT DISTINCT o.*, 'history', r.recorded_at
+    FROM orders o JOIN revisions r ON o.sku = r.sku
+    WHERE o.placed_at < r.recorded_at AND r.recorded_at <= CAST(? AS TIMESTAMP)
+"""
+
 
 def timestamp(text):
     if not TIME.fullmatch(text):
@@ -105,11 +118,43 @@ def export_parquet(db, destination, cutoff):
         os.link(stage, destination)
 
 
-def audit(revisions, orders, cutoff, parquet=None):
-    if any(row[2] > cutoff for row in orders):
-        raise ValueError("audit cutoff precedes an order")
+def price_state(status, unit, sources):
+    for source in sources or []:
+        for field in ("effective_at", "recorded_at"):
+            source[field] = source[field].isoformat() + "Z"
+    return {"status": status, "unit_cents": unit, "sources": sources or []}
+
+
+def price_history(rows, revisions, selected, cutoff):
+    key, sku, placed, quantity = selected
+    recorded = {}
+    for change, version, product, action, _, when, _ in sorted(revisions):
+        if product == sku and placed < when <= cutoff:
+            recorded.setdefault(when, []).append({"change_id": change, "revision": version, "action": action})
+    steps = []
+    previous = None
+    for _, _, _, _, _, status, unit, sources, when in rows:
+        state = price_state(status, unit, sources)
+        if state != previous:
+            steps.append({"known_at": when.isoformat() + "Z", "recorded_revisions": recorded.get(when, []), **state})
+            previous = state
+    return {"order_id": key, "sku": sku, "placed_at": placed.isoformat() + "Z", "quantity": quantity,
+            "cutoff": cutoff.isoformat() + "Z", "history": steps}
+
+
+def audit(revisions, orders, cutoff, parquet=None, *, history_order=None):
     if len({row[0] for row in orders}) != len(orders):
         raise ValueError("duplicate order_id")
+    if history_order is not None:
+        if parquet is not None:
+            raise ValueError("history and Parquet export are mutually exclusive")
+        orders = [row for row in orders if row[0] == history_order]
+        if not orders:
+            raise ValueError(f"unknown order_id: {history_order}")
+        sku = orders[0][1]
+        revisions = [row for row in revisions if row[2] == sku and row[5] <= cutoff]
+    if any(row[2] > cutoff for row in orders):
+        raise ValueError("audit cutoff precedes an order")
     with duckdb.connect(":memory:") as db:
         db.execute("""CREATE TABLE revisions(change_id VARCHAR, revision BIGINT, sku VARCHAR, action VARCHAR,
                       effective_at TIMESTAMP, recorded_at TIMESTAMP, unit_cents BIGINT)""")
@@ -118,20 +163,21 @@ def audit(revisions, orders, cutoff, parquet=None):
             db.executemany("INSERT INTO revisions VALUES (?,?,?,?,?,?,?)", revisions)
         if orders:
             db.executemany("INSERT INTO orders VALUES (?,?,?,?)", orders)
+        questions = AUDIT_QUESTIONS if history_order is None else HISTORY_QUESTIONS
+        db.execute("CREATE TEMP TABLE price_questions AS " + questions, [cutoff])
         query = (ROOT / "prices.sql").read_text(encoding="utf-8")
         if parquet is not None:
-            db.execute("CREATE TEMP TABLE perspectives AS " + query, [cutoff])
+            db.execute("CREATE TEMP TABLE perspectives AS " + query)
             export_parquet(db, parquet, cutoff)
             return {"cutoff": cutoff.isoformat() + "Z", "orders_written": len(orders), "parquet": str(parquet)}
-        rows = db.execute(query, [cutoff]).fetchall()
+        rows = db.execute(query).fetchall()
+    if history_order is not None:
+        return price_history(rows, revisions, orders[0], cutoff)
     by_order = {}
-    for key, sku, placed, qty, perspective, status, unit, sources in rows:
+    for key, sku, placed, qty, perspective, status, unit, sources, _ in rows:
         item = by_order.setdefault(key, {"order_id": key, "sku": sku, "placed_at": placed.isoformat() + "Z",
                                          "quantity": qty})
-        for source in sources or []:
-            for field in ("effective_at", "recorded_at"):
-                source[field] = source[field].isoformat() + "Z"
-        item[perspective] = {"status": status, "unit_cents": unit, "sources": sources or []}
+        item[perspective] = price_state(status, unit, sources)
     deltas = []
     for item in by_order.values():
         old, new = (item[view]["unit_cents"] for view in ("at_order", "at_audit"))
@@ -149,11 +195,13 @@ def main():
     parser.add_argument("revisions", type=Path)
     parser.add_argument("orders", type=Path)
     parser.add_argument("--as-of", required=True)
-    parser.add_argument("--parquet", type=Path, help="write one row per order to a new Parquet file")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--parquet", type=Path, help="write one row per order to a new Parquet file")
+    mode.add_argument("--history", metavar="ORDER_ID", help="explain changes after a specific order was placed")
     args = parser.parse_args()
     try:
         result = audit(load_history(args.revisions), list(read_rows(args.orders, ORDER_FIELDS, order)),
-                       timestamp(args.as_of), args.parquet)
+                       timestamp(args.as_of), args.parquet, history_order=args.history)
     except (ValueError, OverflowError, OSError, csv.Error, duckdb.Error) as exc:
         parser.exit(2, f"audit failed: {exc}\n")
     print(json.dumps(result, ensure_ascii=True, indent=2))

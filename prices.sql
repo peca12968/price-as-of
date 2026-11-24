@@ -5,20 +5,16 @@ WITH history AS (
         PARTITION BY change_id ORDER BY revision
     ) AS superseded_at
     FROM revisions
-), questions AS (
-    SELECT *, 'at_order' AS perspective, placed_at AS known_at FROM orders
-    UNION ALL
-    SELECT *, 'at_audit', CAST(? AS TIMESTAMP) FROM orders
 ), candidates AS (
     SELECT q.*, h.change_id, h.revision, h.effective_at, h.recorded_at, h.unit_cents
-    FROM questions AS q
+    FROM price_questions AS q
     LEFT JOIN history AS h ON h.sku = q.sku
         AND h.recorded_at <= q.known_at
         AND (h.superseded_at IS NULL OR q.known_at < h.superseded_at)
         AND h.action = 'set'
         AND h.effective_at <= q.placed_at
     QUALIFY dense_rank() OVER (
-        PARTITION BY q.order_id, q.perspective
+        PARTITION BY q.order_id, q.perspective, q.known_at
         ORDER BY h.effective_at DESC NULLS LAST
     ) = 1
 )
@@ -27,7 +23,8 @@ SELECT order_id, sku, placed_at, quantity, perspective,
        CASE WHEN count(change_id) = 1 THEN min(unit_cents) END AS price,
        list(struct_pack(change_id := change_id, revision := revision, unit_cents := unit_cents,
                         effective_at := effective_at, recorded_at := recorded_at)
-            ORDER BY change_id) FILTER (WHERE change_id IS NOT NULL) AS sources
+            ORDER BY change_id) FILTER (WHERE change_id IS NOT NULL) AS sources,
+       known_at
 FROM candidates
-GROUP BY order_id, sku, placed_at, quantity, perspective
-ORDER BY order_id, perspective;
+GROUP BY order_id, sku, placed_at, quantity, perspective, known_at
+ORDER BY order_id, perspective, known_at;

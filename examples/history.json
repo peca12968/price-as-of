@@ -1,0 +1,181 @@
+[
+  {
+    "order_id": "K13",
+    "sku": "KIT",
+    "placed_at": "2026-04-13T00:00:00Z",
+    "quantity": 2,
+    "cutoff": "2026-04-23T00:00:00Z",
+    "history": [
+      {
+        "known_at": "2026-04-13T00:00:00Z",
+        "recorded_revisions": [],
+        "status": "priced",
+        "unit_cents": 850,
+        "sources": [
+          {
+            "change_id": "spring",
+            "revision": 1,
+            "unit_cents": 850,
+            "effective_at": "2026-04-10T00:00:00Z",
+            "recorded_at": "2026-04-12T00:00:00Z"
+          }
+        ]
+      },
+      {
+        "known_at": "2026-04-20T00:00:00Z",
+        "recorded_revisions": [
+          {
+            "change_id": "spring",
+            "revision": 2,
+            "action": "set"
+          }
+        ],
+        "status": "priced",
+        "unit_cents": 1000,
+        "sources": [
+          {
+            "change_id": "base",
+            "revision": 1,
+            "unit_cents": 1000,
+            "effective_at": "2026-04-01T00:00:00Z",
+            "recorded_at": "2026-04-01T00:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "order_id": "K16",
+    "sku": "KIT",
+    "placed_at": "2026-04-16T00:00:00Z",
+    "quantity": 3,
+    "cutoff": "2026-04-23T00:00:00Z",
+    "history": [
+      {
+        "known_at": "2026-04-16T00:00:00Z",
+        "recorded_revisions": [],
+        "status": "priced",
+        "unit_cents": 750,
+        "sources": [
+          {
+            "change_id": "flash",
+            "revision": 1,
+            "unit_cents": 750,
+            "effective_at": "2026-04-15T00:00:00Z",
+            "recorded_at": "2026-04-16T00:00:00Z"
+          }
+        ]
+      },
+      {
+        "known_at": "2026-04-22T00:00:00Z",
+        "recorded_revisions": [
+          {
+            "change_id": "flash",
+            "revision": 2,
+            "action": "withdraw"
+          }
+        ],
+        "status": "priced",
+        "unit_cents": 800,
+        "sources": [
+          {
+            "change_id": "spring",
+            "revision": 2,
+            "unit_cents": 800,
+            "effective_at": "2026-04-14T00:00:00Z",
+            "recorded_at": "2026-04-20T00:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "order_id": "G07",
+    "sku": "GIFT",
+    "placed_at": "2026-04-07T00:00:00Z",
+    "quantity": 1,
+    "cutoff": "2026-04-23T00:00:00Z",
+    "history": [
+      {
+        "known_at": "2026-04-07T00:00:00Z",
+        "recorded_revisions": [],
+        "status": "ambiguous",
+        "unit_cents": null,
+        "sources": [
+          {
+            "change_id": "gift-a",
+            "revision": 1,
+            "unit_cents": 400,
+            "effective_at": "2026-04-05T00:00:00Z",
+            "recorded_at": "2026-04-05T00:00:00Z"
+          },
+          {
+            "change_id": "gift-b",
+            "revision": 1,
+            "unit_cents": 450,
+            "effective_at": "2026-04-05T00:00:00Z",
+            "recorded_at": "2026-04-06T00:00:00Z"
+          }
+        ]
+      },
+      {
+        "known_at": "2026-04-18T00:00:00Z",
+        "recorded_revisions": [
+          {
+            "change_id": "gift-b",
+            "revision": 2,
+            "action": "withdraw"
+          }
+        ],
+        "status": "priced",
+        "unit_cents": 400,
+        "sources": [
+          {
+            "change_id": "gift-a",
+            "revision": 1,
+            "unit_cents": 400,
+            "effective_at": "2026-04-05T00:00:00Z",
+            "recorded_at": "2026-04-05T00:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "order_id": "B04",
+    "sku": "BOOK",
+    "placed_at": "2026-04-04T00:00:00Z",
+    "quantity": 1,
+    "cutoff": "2026-04-23T00:00:00Z",
+    "history": [
+      {
+        "known_at": "2026-04-04T00:00:00Z",
+        "recorded_revisions": [],
+        "status": "missing",
+        "unit_cents": null,
+        "sources": []
+      },
+      {
+        "known_at": "2026-04-17T00:00:00Z",
+        "recorded_revisions": [
+          {
+            "change_id": "book",
+            "revision": 1,
+            "action": "set"
+          }
+        ],
+        "status": "priced",
+        "unit_cents": 500,
+        "sources": [
+          {
+            "change_id": "book",
+            "revision": 1,
+            "unit_cents": 500,
+            "effective_at": "2026-04-03T00:00:00Z",
+            "recorded_at": "2026-04-17T00:00:00Z"
+          }
+        ]
+      }
+    ]
+  }
+]

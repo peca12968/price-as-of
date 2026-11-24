@@ -16,8 +16,8 @@ ORDERS = ROOT / "examples/orders.csv"
 FINAL = "2026-04-23T00:00:00Z"
 
 
-def cli(history=HISTORY, orders=ORDERS, cutoff=FINAL):
-    return subprocess.run([sys.executable, ROOT / "audit.py", history, orders, "--as-of", cutoff],
+def cli(history=HISTORY, orders=ORDERS, cutoff=FINAL, *, flags=()):
+    return subprocess.run([sys.executable, ROOT / "audit.py", history, orders, "--as-of", cutoff, *flags],
                           capture_output=True, text=True, timeout=20)
 
 
@@ -73,6 +73,50 @@ class PriceTests(unittest.TestCase):
         self.assertEqual(rows["at"]["at_audit"]["unit_cents"], 5)
         self.assertIsNone(audit.audit([], orders, later)["comparable_delta_cents"])
         self.assertEqual(audit.audit(history, [], later)["orders"], [])
+
+    def test_history_groups_same_instant_and_keeps_source_only_changes(self):
+        placed = datetime(2026, 1, 3)
+        early = placed - timedelta(days=2)
+        promotion = placed - timedelta(days=1)
+        conflict, skipped, restored, refreshed, later = (
+            placed + timedelta(microseconds=i) for i in range(1, 6)
+        )
+        revisions = [
+            ("base", 1, "KIT", "set", early, early, 100),
+            ("a", 1, "KIT", "set", promotion, conflict, 0),
+            ("b", 1, "KIT", "set", promotion, conflict, 0),
+            ("future", 1, "KIT", "set", placed + timedelta(days=1), skipped, 3),
+            ("b", 2, "KIT", "withdraw", None, restored, None),
+            ("a", 2, "KIT", "withdraw", None, restored, None),
+            ("base", 2, "KIT", "set", early, refreshed, 100),
+            ("base", 3, "KIT", "set", early, later, 200),
+        ]
+        orders = [("past", "KIT", placed, 2), ("future", "KIT", later, 2)]
+        report = audit.audit(revisions[::-1], orders, refreshed, history_order="past")
+        self.assertEqual(report["order_id"], "past")
+        steps = report["history"]
+        moments = [placed, conflict, restored, refreshed]
+        self.assertEqual([s["known_at"] for s in steps], [t.isoformat() + "Z" for t in moments])
+        for step, time in zip(steps, moments):
+            self.assertEqual({field: step[field] for field in ("status", "unit_cents", "sources")},
+                             replay(revisions, "KIT", placed, time))
+        self.assertEqual(steps[0]["recorded_revisions"], [])
+        self.assertEqual(steps[1]["recorded_revisions"], [
+            {"change_id": key, "revision": 1, "action": "set"} for key in ("a", "b")
+        ])
+        self.assertEqual(steps[2]["recorded_revisions"], [
+            {"change_id": key, "revision": 2, "action": "withdraw"} for key in ("a", "b")
+        ])
+
+    def test_history_demo_matches_cli(self):
+        data = json.loads((ROOT / "examples/history.json").read_text(encoding="utf-8"))
+        self.assertEqual([row["order_id"] for row in data], ["K13", "K16", "G07", "B04"])
+        for sample in data:
+            result = cli(flags=("--history", sample["order_id"]))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), sample)
+        self.assertEqual(cli(flags=("--history", "unknown")).returncode, 2)
+        self.assertEqual(cli(flags=("--history", "K16", "--parquet", "unused.parquet")).returncode, 2)
 
     def test_randomized_sql_against_ordered_replay(self):
         rng = random.Random(7401)
