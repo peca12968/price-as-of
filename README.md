@@ -46,7 +46,7 @@ python audit.py examples/revisions.csv examples/orders.csv --as-of 2026-04-23T00
 
 每筆訂單輸出一列，包含查核截止時間、兩次單價與狀態、兩組巢狀來源明細及數量加權差額。時間統一為 UTC；來源明細的生效及登錄欄位使用 UTC 的無時區時間戳。無法比較的差額保持 NULL，零元差額保留為零。金額差採 DECIMAL(38,0)，即使單價與數量都到達輸入上限也能精確保存。提供新的目的檔名即可匯出，程式在同一目錄暫存完整結果，再透過硬連結發布，既有目的檔會得到結束碼 2。
 
-檔案依回查單價、訂單編號排序，以便下游依價格範圍查核。跨專案演練交錯建立 6,144 筆訂單，尋找單價 800 美分且數量為 2 的訂單。Rowgroup Scout 從檔尾識別出三組中只有一組需要保留，再以 DuckDB 實查並逐筆核對全部 1,024 個訂單編號。[整合演練](layout_drill.py) · [Rowgroup Scout](https://github.com/peca12968/rowgroup-scout)
+檔案依回查單價、訂單編號排序，以便下游依價格範圍查核。跨專案演練交錯建立 6,144 筆訂單，尋找單價 800 美分且數量為 2 的訂單。Rowgroup Scout 從檔尾識別出三組中只有一組需要保留，再以 DuckDB 實查並逐筆核對全部 1,024 個訂單編號。[整合演練](layout_drill.py) · [Rowgroup Scout](https://github.com/peca12968/price-as-of/tree/main/modules/rowgroup-scout)
 
 ### 核對雙時間查詢
 
@@ -55,3 +55,5 @@ python audit.py examples/revisions.csv examples/orders.csv --as-of 2026-04-23T00
 **履歷用語**　以 DuckDB 視窗函式實作雙時間價格查核，支援補登、更正、撤回及同時生效的價格衝突；用 Python 重播歷史版本，逐筆核對 1,440 次查詢結果。
 
 本專案使用 AI 輔助開發。商品、價格與訂單皆為合成資料。
+
+[同庫模組與整合測試](modules/README.md)
